@@ -13,6 +13,7 @@ quality=false
 custom=false
 format=0
 verbose=0
+month=false
 interactive=true
 base_urls_list="base_urls_list.txt"
 raw_urls_list="raw_urls_list.txt"
@@ -69,7 +70,7 @@ require() {
 
 custom_files() {
   if [[ $interactive == false ]]; then
-    die '$ERROR custom files needs to be interactive'
+    die "$error custom files option can only be used interactivly"
   else
     base_urls_list=$(whiptail --inputbox "Enter the name of the file where the raw URLs are stored:" 10 60 "base_urls_list.txt" 3>&1 1>&2 2>&3)
     raw_urls_list=$(whiptail --inputbox "Enter the name of the file where the list of direct media to be downloaded will be stored:" 10 60 "raw_urls_list.txt" 3>&1 1>&2 2>&3)
@@ -80,7 +81,7 @@ custom_files() {
 
 create_raw_urls() {
   if ((verbose == 1)); then
-    printf "$warning This can take a while depending on the number of URLs to process \n"
+    printf "$warning Creating Raw URLS.  This can take a while depending on the number of URLs to process \n"
   fi
   grep -v '^ *#' <"$base_urls_list" | while IFS= read -r line; do
     curl -s "$line" | grep -v "p.hegre.com" | grep -v "cdn2.hegre.com" | grep -E $format | grep -o "http[^ '\"]*" | sed 's/\?.*//' | awk 'NR>1' | head -n 1
@@ -94,31 +95,78 @@ create_links() {
     printf "Creating Links \n"
     printf "$warning This can take a while depending on the number of URLs to process \n"
   fi
-  curl -s "$url_base" | grep "p.hegre.com" | cut -d "<" --output-delimiter ">" -f 2 | sed 's,a href=",https://www.hegre.com,' | sed 's/" .*/ /' >"$base_urls_list"
+  curl -s $url_base |grep -E 'a href="/photos/|a href="/films/' | cut -d "<" --output-delimiter ">" -f 2 | sed 's,a href=",https://www.hegre.com,' | sed 's/" .*/ /' | grep "hegre" >> "$base_urls_list"
   if ((verbose == 1)); then
-    printf "$success Creation of base URLs \n"
+    printf "$success Creation of base URLs for %s\n" "$url_base"
   fi
+}
+
+#Generate links from supplied options
+
+generate_links() {
+if [[ $url_base == false ]]; then
+  if [[ $date == false ]] && [[ $model == false ]]; then
+    if ((verbose == 1)); then
+      printf "$success Downloading content from %s. Processing...... \n" "$(date "+%B %Y")"
+    fi
+    url_base="https://www.hegre.com/search?month=$(date +M)&year=$(date +Y)"
+    create_links
+  elif [[ $date == false ]] && [[ $model != false ]]; then
+    if ((verbose == 1)); then
+      printf "$success Downloading content from %s. Processing...... \n" "$model"
+    fi
+    url_base="https://www.hegre.com/models/$model"
+    create_links
+  elif [[ $date != false ]] && [[ $model != false ]]; then
+    die "$error Sorry using dates and models together is not supported!"
+  elif [[ $date != false ]] && [[ $model == false ]]; then
+    if (( verbose == 1 )); then
+      printf "$success Downloading content from %s. Processing...... \n" "$date"
+    fi
+    year=${date:0:4}
+    month=${date:6:7}
+    if (( month > 1 )); then
+      url_base="https://www.hegre.com/search?month=$month&year=$year"
+      create_links
+    elif (( year >2001 && year < $(date +%Y) )) ; then
+      for month in {1..12}; do
+        url_base="https://www.hegre.com/search?month=$month&year=$year"
+        create_links
+      done
+    else
+     die "$error There is something wrong with your date. Please use the number form YYYY or YYYY/MM only."
+    fi
+  else
+    die "$error Sorry I don't understand what you want to download. I got the options of URL = %s Model = %s Date =  %s and Type = %s" "url_base" "$model" "$date" "$type"
+  fi
+  create_raw_urls
+else
+  create_links
+  create_raw_urls
+fi
 }
 
 #Run download of existing links
 
 download() {
   if [[ $interactive == false ]]; then
-    read -s -p "Enter Hegre Username: " username
+    read -p -r "Enter Hegre Username: " username
     printf "\n"
-    read -s -p "Enter Hegre Password: " password
-    screen -dmS download_hegre_content bash -c "wget -i $raw_urls_list -q --show-progress --user $username --password $password"
+    read -s -p -r "Enter Hegre Password: " password
+    printf "$success This would be a download"
+#    screen -dmS download_hegre_content bash -c "wget -i $raw_urls_list -q --show-progress --user $username --password $password"
     if ((verbose == 1)); then
-      printf "\nDownloads Started in the background \n"
-      printf "Your can attach and view the downloads with \"screen -r download_hegre_content\" \n "
+      printf "\n$success Downloads Started in the background \n"
+      printf "$success Your can attach and view the downloads with \"screen -r download_hegre_content\" \n "
     fi
   else
     whiptail --title "Hegre Media Downloader" --msgbox "After this message you will have to enter your login for Hegre." 15 60
     username=$(whiptail --inputbox "Enter your username:" 10 60 3>&1 1>&2 2>&3)
     password=$(whiptail --passwordbox "Enter your password:" 10 60 3>&1 1>&2 2>&3)
     whiptail --title "Hegre Media Downloader" --msgbox "— After clicking ok, a download screen will appear. You can run 'CTRL + A + D' to keep it in the background.\n— To see the list of retrieved URLs, run the command 'cat $raw_urls_list'." 10 60
-    screen -dmS download_hegre_content bash -c "wget -i $raw_urls_list -q --show-progress --user $username --password $password"
-    screen -r download_hegre_content
+    printf "$success This would be a download"
+#    screen -dmS download_hegre_content bash -c "wget -i $raw_urls_list -q --show-progress --user $username --password $password"
+#    screen -r download_hegre_content
   fi
 }
 
@@ -126,7 +174,11 @@ download() {
 
 #Basic checks
 
-require curl pv screen whiptail
+if [[ $interactive ==  false ]]; then
+  require curl pv screen
+else
+  require curl pv screen whiptail
+fi
 
 case "$(curl -s --max-time 2 -I https://www.hegre.com/ | sed 's/^[^ ]*  *\([0-9]\).*/\1/; 1q')" in
 [23]) ;;
@@ -139,9 +191,9 @@ esac
 #Process the arguments
 
 while :; do
-  case "$1" in
+  case "${1,,}" in
   -h | --help)
-    show_help # Display a usage synopsis.
+    help # Display a usage synopsis.
     exit
     ;;
   -d | --download)
@@ -166,7 +218,7 @@ while :; do
       die "$error: \"type\" requires a non-empty option argument."
     fi
     ;;
-  -n | --thumbnail)
+  -n | --thumbnail | --thumbnails)
     thumbnail=true
     ;;
   -l | --latest)
@@ -226,14 +278,18 @@ done
 
 #Main program
 
+if [[ $interactive == false ]]; then
+  printf "Thank you for downloading the program. \nIf you find this program useful, don't forget to give a star! \n— https://github.com/baptiste313/hegre-media-downloader/"
+fi
+
 if ((task == 0)); then
   die "$error: You need to specify one of the core options (--download or --create-links)"
 fi
 
 if [[ $thumbnail == true ]]; then
-  if [[ $type == "film" ]]; then
+  if [[ $type == "films" ]]; then
     format=".mp4|.jpg"
-  elif [[ $type == "gallery" ]]; then
+  elif [[ $type == "galleries" ]]; then
     format=".zip|.jpg"
   elif [[ $type == "both" ]]; then
     format=".mp4|.zip|.jpg"
@@ -241,7 +297,7 @@ if [[ $thumbnail == true ]]; then
     die "$error: \"type\" is unknown."
   fi
 else
-  if [[ $type == "film" ]]; then
+  if [[ $type == "films" ]]; then
     format=".mp4"
   elif [[ $type == "gallery" ]]; then
     format=".zip"
@@ -256,50 +312,54 @@ if [[ $custom == "true" ]]; then
   custom_files
 else
   if ((verbose == 1)); then
-    printf "Using default files for link storage \n"
+    printf "$success Using default files for link storage \n"
   fi
 fi
 
-if ((task == 1)); then
+if ((task == 1)); then #Downloads Only
   if [[ -s $raw_urls_list ]]; then
     if ((verbose == 1)); then
-      printf "We will run downloads only. Processing...... \n"
+      printf "$success We will run downloads only. Processing...... \n"
     fi
     download
   else
     die "$error No links to download!"
   fi
-elif ((task == 2)) && [[ $url_base != false ]]; then
+elif ((task == 2)) && [[ $url_base == false ]]; then #Create Links only
   if ((verbose == 1)); then
-    printf "Generating links for %s. Processing...... \n" "$url_base only"
+    printf "$success Wiping old Links"
   fi
-  create_links
+  echo " " > "$base_urls_list"
+  echo " " > "$raw_urls_list"
+  if ((verbose == 1)); then
+    printf "$success Generating links. Processing...... \n"
+  fi
+  generate_links
+  if ((verbose == 1)); then
+    printf "$success Generating links part 2. Processing...... \n"
+  fi
   create_raw_urls
-elif ((task == 2)) && [[ $url_base == false ]]; then
-  if [[ $date == false ]] && [[ $model == false ]]; then
-    if ((verbose == 1)); then
-      printf "Downloading content from %s. Processing...... \n" "$(date "+%B %Y")"
-    fi
-    url_base="https://www.hegre.com/search?month=$(date +M)&year=$(date +Y)"
-    create_links
-    create_raw_urls
-  elif [[ $date == false ]] && [[ $model != false ]]; then
-    if ((verbose == 1)); then
-      printf "Downloading content from %s. Processing...... \n" "$model"
-    fi
-    url_base="https://www.hegre.com/models/$model"
-    create_links
-    create_raw_urls
+  if [[ -s $raw_urls_list ]]; then
+    true
   else
-    [[ $date != false ]] && [[ $model != false ]]
-    die "Sorry using dates and models together is not supported!"
+    die "$error No links failed!"
   fi
-elif ((task == 3)); then
+elif ((task == 3)); then #Create links and then download
   if ((verbose == 1)); then
-    printf "Generating links and downloading. Processing...... \n"
+    printf "$success Generating links. Processing...... \n"
   fi
-  create_links
+  generate_links
+  if ((verbose == 1)); then
+    printf "$success Generating links part 2. Processing...... \n"
+  fi
   create_raw_urls
-  download
+  if [[ -s $raw_urls_list ]]; then
+    if ((verbose == 1)); then
+      printf "$success Download time!. Processing...... \n"
+    fi
+    download
+  else
+    die "$error No links to download!"
+  fi
 fi
 #end program
