@@ -86,6 +86,9 @@ create_raw_urls() {
   grep -v '^ *#' <"$base_urls_list" | while IFS= read -r line; do
     curl -s "$line" | grep -v "p.hegre.com" | grep -v "cdn2.hegre.com" | grep -E $format | grep -o "http[^ '\"]*" | sed 's/\?.*//' | awk 'NR>1' | head -n 1
   done >"$raw_urls_list"
+  if ((verbose == 1)); then
+    printf "$success raw urls are done! \n" 
+  fi
 }
 
 #Create links that contain one or more media files for the download
@@ -139,10 +142,8 @@ if [[ $url_base == false ]]; then
   else
     die "$error Sorry I don't understand what you want to download. I got the options of URL = %s Model = %s Date =  %s and Type = %s" "url_base" "$model" "$date" "$type"
   fi
-  create_raw_urls
 else
   create_links
-  create_raw_urls
 fi
 }
 
@@ -224,6 +225,7 @@ while :; do
   -l | --latest)
     if [[ "$2" ]]; then
       latest=$2
+      die "$warn This is not yet implemented....CANCELLING"
       shift
     else
       die "$error: \"latest\" requires a non-empty option argument."
@@ -248,6 +250,7 @@ while :; do
   --quality)
     if [[ "$2" ]]; then
       quality=$2
+      die "$warn This is not yet implemented....CANCELLING"
       shift
     else
       die "$error: \"quality\" requires a non-empty option argument."
@@ -338,11 +341,15 @@ elif ((task == 2)) && [[ $url_base == false ]]; then #Create Links only
   if ((verbose == 1)); then
     printf "$success Generating links part 2. Processing...... \n"
   fi
-  create_raw_urls
+  if [[ -s $base_urls_list ]]; then
+    create_raw_urls
+  else
+    die "$error Links failed!"
+  fi
   if [[ -s $raw_urls_list ]]; then
     true
   else
-    die "$error No links failed!"
+    die "$error Links failed!"
   fi
 elif ((task == 3)); then #Create links and then download
   if ((verbose == 1)); then
@@ -352,7 +359,11 @@ elif ((task == 3)); then #Create links and then download
   if ((verbose == 1)); then
     printf "$success Generating links part 2. Processing...... \n"
   fi
-  create_raw_urls
+  if [[ -s $base_urls_list ]]; then
+    create_raw_urls
+  else
+    die "$error Links failed!"
+  fi
   if [[ -s $raw_urls_list ]]; then
     if ((verbose == 1)); then
       printf "$success Download time!. Processing...... \n"
